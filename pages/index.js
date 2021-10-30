@@ -1,82 +1,184 @@
-import Head from 'next/head'
+import AsyncRetry from 'async-retry'
+import axios from 'axios'
+import { useState } from 'react'
+import { DragDropContext, Draggable, Droppable } from 'react-beautiful-dnd'
+import { readFileAsUrl } from '../utils/common'
 
 export default function Home() {
+  const [comicId, setComicId] = useState('')
+  const [chapterId, setChapterId] = useState('')
+  const [lang, setLang] = useState('')
+  const [items, setItems] = useState([])
+
+  const submit = async () => {
+    const pageHash = []
+    for (const [idx, item] of items.entries()) {
+      await AsyncRetry(async () => {
+        try {
+          const formData = new FormData()
+          formData.append('files', item.file)
+          const resp = await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/upload/single`, formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+              authorization: process.env.NEXT_PUBLIC_AUTH_TOKEN,
+            },
+          })
+          pageHash.push(resp.data.data)
+          console.log(`uploaded ${(idx + 1) * 100 / items.length}%`)
+        } catch (err) {
+          console.log(err)
+          throw new Error('Try again')
+        }
+      }, {
+        retries: 50,
+        minTimeout: 500,
+        maxTimeout: 2500
+      })
+    }
+
+    console.log(pageHash)
+
+    await AsyncRetry(async () => {
+      try {
+        const params = {
+          images: pageHash,
+          lang: lang
+        }
+        await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/pages/${comicId}/${chapterId}`, params, {
+          headers: {
+            authorization: process.env.NEXT_PUBLIC_AUTH_TOKEN,
+          },
+        })
+        console.log(`chapter uploaded!`)
+      } catch (err) {
+        console.log(err)
+        throw new Error('Try again')
+      }
+    }, {
+      retries: 50,
+      minTimeout: 500,
+      maxTimeout: 2500
+    })
+  }
+
+  const addImages = async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newItems = []
+      for (const file of e.target.files) {
+        const imgUrl = await readFileAsUrl(file)
+        newItems.push({
+          id: Math.ceil(Math.random() * 1000).toString() + Math.ceil(Math.random() * 1000).toString(),
+          content: imgUrl,
+          file: file
+        })
+      }
+      const currentItems = [...items]
+      setItems(currentItems.concat(newItems))
+    }
+  }
+
+  const reorder = (list, startIndex, endIndex) => {
+    const result = Array.from(list);
+    const [removed] = result.splice(startIndex, 1);
+    result.splice(endIndex, 0, removed);
+
+    return result;
+  };
+
+  const grid = 8;
+
+  const getItemStyle = (isDragging, draggableStyle) => ({
+    // some basic styles to make the items look a bit nicer
+    userSelect: "none",
+    padding: grid * 2,
+    margin: `0 0 ${grid}px 0`,
+
+    // change background colour if dragging
+    background: isDragging ? "lightgreen" : "grey",
+
+    // styles we need to apply on draggables
+    ...draggableStyle
+  });
+
+  const getListStyle = isDraggingOver => ({
+    background: isDraggingOver ? "lightblue" : "lightgrey",
+    padding: grid,
+    width: 250
+  });
+
+  const onDragEnd = (result) => {
+    // dropped outside the list
+    if (!result.destination) {
+      return;
+    }
+
+    const newItemsOrder = reorder(
+      items,
+      result.source.index,
+      result.destination.index
+    );
+
+    setItems(newItemsOrder)
+
+  }
+
+  console.log(items)
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen py-2">
-      <Head>
-        <title>Create Next App</title>
-        <link rel="icon" href="/favicon.ico" />
-      </Head>
+    <div>
+      <div>
+        <label>Comic ID</label>
+        <input value={comicId} onChange={e => setComicId(e.target.value)} />
+      </div>
+      <div>
+        <label>Chapter ID</label>
+        <input value={chapterId} onChange={e => setChapterId(e.target.value)} />
+      </div>
+      <div>
+        <label>Lang</label>
+        <input value={lang} onChange={e => setLang(e.target.value)} />
+      </div>
 
-      <main className="flex flex-col items-center justify-center w-full flex-1 px-20 text-center">
-        <h1 className="text-6xl font-bold">
-          Welcome to{' '}
-          <a className="text-blue-600" href="https://nextjs.org">
-            Next.js!
-          </a>
-        </h1>
+      <div>
+        <input onChange={addImages} type="file" multiple />
+      </div>
 
-        <p className="mt-3 text-2xl">
-          Get started by editing{' '}
-          <code className="p-3 font-mono text-lg bg-gray-100 rounded-md">
-            pages/index.js
-          </code>
-        </p>
 
-        <div className="flex flex-wrap items-center justify-around max-w-4xl mt-6 sm:w-full">
-          <a
-            href="https://nextjs.org/docs"
-            className="p-6 mt-6 text-left border w-96 rounded-xl hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Documentation &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Find in-depth information about Next.js features and API.
-            </p>
-          </a>
 
-          <a
-            href="https://nextjs.org/learn"
-            className="p-6 mt-6 text-left border w-96 rounded-xl hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Learn &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Learn about Next.js in an interactive course with quizzes!
-            </p>
-          </a>
+      <DragDropContext onDragEnd={onDragEnd}>
+        <Droppable droppableId="droppable">
+          {(provided, snapshot) => (
+            <div
+              {...provided.droppableProps}
+              ref={provided.innerRef}
+              style={getListStyle(snapshot.isDraggingOver)}
+            >
+              {items.map((item, index) => (
+                <Draggable key={item.id} draggableId={item.id} index={index}>
+                  {(provided, snapshot) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.draggableProps}
+                      {...provided.dragHandleProps}
+                      style={getItemStyle(
+                        snapshot.isDragging,
+                        provided.draggableProps.style
+                      )}
+                    >
+                      <img src={item.content} />
+                    </div>
+                  )}
+                </Draggable>
+              ))}
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
 
-          <a
-            href="https://github.com/vercel/next.js/tree/master/examples"
-            className="p-6 mt-6 text-left border w-96 rounded-xl hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Examples &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Discover and deploy boilerplate example Next.js projects.
-            </p>
-          </a>
-
-          <a
-            href="https://vercel.com/import?filter=next.js&utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-            className="p-6 mt-6 text-left border w-96 rounded-xl hover:text-blue-600 focus:text-blue-600"
-          >
-            <h3 className="text-2xl font-bold">Deploy &rarr;</h3>
-            <p className="mt-4 text-xl">
-              Instantly deploy your Next.js site to a public URL with Vercel.
-            </p>
-          </a>
-        </div>
-      </main>
-
-      <footer className="flex items-center justify-center w-full h-24 border-t">
-        <a
-          className="flex items-center justify-center"
-          href="https://vercel.com?utm_source=create-next-app&utm_medium=default-template&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Powered by{' '}
-          <img src="/vercel.svg" alt="Vercel Logo" className="h-4 ml-2" />
-        </a>
-      </footer>
+      <div>
+        <button onClick={submit}>Upload</button>
+      </div>
     </div>
   )
 }
