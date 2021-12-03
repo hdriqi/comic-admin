@@ -38,27 +38,29 @@ export default function Home() {
 
     console.log(pageHash)
 
-    await AsyncRetry(async () => {
-      try {
-        const params = {
-          images: pageHash,
-          lang: lang
+    for (const chapter of chapterId.split(',')) {
+      await AsyncRetry(async () => {
+        try {
+          const params = {
+            images: pageHash,
+            lang: lang
+          }
+          await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/pages/${comicId}/${chapter}`, params, {
+            headers: {
+              authorization: process.env.NEXT_PUBLIC_AUTH_TOKEN,
+            },
+          })
+          console.log(`chapter uploaded!`)
+        } catch (err) {
+          console.log(err)
+          throw new Error('Try again')
         }
-        await axios.post(`${process.env.NEXT_PUBLIC_API_URL}/pages/${comicId}/${chapterId}`, params, {
-          headers: {
-            authorization: process.env.NEXT_PUBLIC_AUTH_TOKEN,
-          },
-        })
-        console.log(`chapter uploaded!`)
-      } catch (err) {
-        console.log(err)
-        throw new Error('Try again')
-      }
-    }, {
-      retries: 50,
-      minTimeout: 500,
-      maxTimeout: 2500
-    })
+      }, {
+        retries: 50,
+        minTimeout: 500,
+        maxTimeout: 2500
+      })
+    }
   }
 
   const addImages = async (e) => {
